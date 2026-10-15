@@ -403,6 +403,25 @@ function buildDiscover(kidsOnly = false) {
 
   const chart = (k) => ((discoverCache.charts[k] && discoverCache.charts[k].list) || []).filter(fresh).map(decorate);
 
+  // Latest releases: titles from charts + recommendation pools released this year or last,
+  // newest first (IMDb's RELEASE_DATE sort is flooded by undated announcements, so derive instead).
+  const yNow = new Date().getFullYear();
+  const pool = [];
+  for (const k of Object.keys(CHARTS)) {
+    const kind = /Movies$/.test(k) ? 'movie' : 'series';
+    for (const x of ((discoverCache.charts[k] && discoverCache.charts[k].list) || [])) if (x.year && x.year >= yNow - 1 && x.kind === kind) pool.push(x);
+  }
+  for (const rec of Object.values(discoverCache.mlt)) for (const x of (rec.list || [])) if (x.year && x.year >= yNow - 1) pool.push(x);
+  const latestAll = [...new Map(pool.filter((x) => fresh(x) && (x.votes || 0) >= 500).map((x) => [x.imdbId, x])).values()]
+    .sort((a, b) => b.year - a.year || (b.votes || 0) - (a.votes || 0));
+  const latestMovies = latestAll.filter((x) => x.kind === 'movie').map(decorate);
+  const latestSeries = latestAll.filter((x) => x.kind !== 'movie').map(decorate);
+
+  // latest releases from IMDb (sorted by real release date; skip announcements without a date/votes)
+  const today = new Date(Date.now() + 18 * 3600e3).toISOString().slice(0, 10);
+  const latest = (k) => ((discoverCache.latest && discoverCache.latest[k] && discoverCache.latest[k].list) || [])
+    .filter((x) => x.rel && x.rel <= today && fresh(x) && (x.votes || 0) >= 500).map(decorate);
+
   // "Because you watched X" rows for the most recently watched/started titles
   const recent = sd.filter((x) => x.last && discoverCache.mlt[x.id]).sort((a, b) => b.last - a.last).slice(0, 4);
   const because = recent.map((seed) => ({
@@ -427,6 +446,8 @@ function buildDiscover(kidsOnly = false) {
     watchlist: lists.watchlist.slice().reverse().map((x) => ({ ...x, inList: true, owned: owned.has(x.imdbId) })),
     popularMovies: chart('popularMovies').slice(0, 40),
     popularSeries: chart('popularSeries').slice(0, 40),
+    latestMovies: latestMovies.slice(0, 40),
+    latestSeries: latestSeries.slice(0, 40),
     topMovies: chart('topMovies').slice(0, 60),
     topSeries: chart('topSeries').slice(0, 60),
   };

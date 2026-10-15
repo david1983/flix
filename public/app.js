@@ -191,7 +191,7 @@ function loadDiscover(force) {
     DISC = d;
     DISC_BY_ID.clear();
     const all = [...(d.kidsPicks || []), ...(d.movies || []), ...(d.series || []), ...(d.watchlist || []), ...(d.popularMovies || []), ...(d.popularSeries || []),
-      ...(d.topMovies || []), ...(d.topSeries || []), ...(d.because || []).flatMap((b) => b.items)];
+      ...(d.topMovies || []), ...(d.topSeries || []), ...(d.latestMovies || []), ...(d.latestSeries || []), ...(d.because || []).flatMap((b) => b.items)];
     for (const x of all) { const prev = DISC_BY_ID.get(x.imdbId); DISC_BY_ID.set(x.imdbId, prev && prev.because ? prev : x); }
     return d;
   }).catch((e) => { discPromise = null; throw e; });
@@ -390,6 +390,8 @@ async function renderDiscover() {
   html += prow('Series you might like', d.series.slice(0, 25));
   html += prow('Kids & family picks', d.kidsPicks, `for ${SETTINGS.kidsBrand}`);
   for (const b of d.because) html += prow(`Because you watched ${b.seed}`, b.items);
+  html += prow('Latest movies', d.latestMovies || []);
+  html += prow('Latest series', d.latestSeries || []);
   html += prow('Popular movies right now', d.popularMovies);
   html += prow('Popular series right now', d.popularSeries);
   html += prow('IMDb Top 250 you don’t have', d.topMovies, 'movies');
