@@ -157,10 +157,11 @@ function itemCard(it, opts = {}) {
   else if (opts.resume && pct) sub = `${fmtTime(it.duration - it.progress.pos)} left`;
   const shots = it.shots || 1;
   const n = it.thumb ? 1 + Math.floor(Math.random() * shots) : 0; // random start frame every render
+  const cycle = !opts.noCycle && it.thumb && shots > 1;
   return card({
     title, sub,
     img: it.thumb ? `/api/thumb/${it.id}${n > 1 ? '.' + n : ''}.jpg` : '',
-    cyc: it.thumb && shots > 1 ? { id: it.id, n, shots, backN: (n % shots) + 1 } : null,
+    cyc: cycle ? { id: it.id, n, shots, backN: (n % shots) + 1 } : null,
     pct, watched: it.progress.watched, open: (opts.play ? 'play:' : 'item:') + it.id, playable: opts.play,
   });
 }
@@ -512,14 +513,14 @@ function renderKids() {
   const cw = continueWatching(true);
   html += row('▶️ Keep watching', cw);
   if (shows.length) html += row('📺 Shows', shows.map(showCard));
-  html += row('🎨 Cartoons', movies.filter((m) => hasGenre(m, 'Animation')).sort((a, b) => b.added - a.added).map((i) => itemCard(i)));
-  html += row('👨‍👩‍👧 Family movies', movies.filter((m) => !hasGenre(m, 'Animation')).sort((a, b) => (a.year || 0) - (b.year || 0)).map((i) => itemCard(i)));
+  html += row('🎨 Cartoons', movies.filter((m) => hasGenre(m, 'Animation')).sort((a, b) => b.added - a.added).map((i) => itemCard(i, { noCycle: true })));
+  html += row('👨‍👩‍👧 Family movies', movies.filter((m) => !hasGenre(m, 'Animation')).sort((a, b) => (a.year || 0) - (b.year || 0)).map((i) => itemCard(i, { noCycle: true })));
   for (const [name, list] of LIB.collections) {
     const k = list.filter((i) => i.kidsSafe);
-    if (k.length >= 2) html += row(`⭐ ${name}`, k.map((i) => itemCard(i)));
+    if (k.length >= 2) html += row(`⭐ ${name}`, k.map((i) => itemCard(i, { noCycle: true })));
   }
-  html += row('🔁 Watch again', movies.filter((m) => m.progress.watched).map((i) => itemCard(i)));
-  html += row('🍿 Everything', movies.slice().sort((a, b) => displayTitle(a).localeCompare(displayTitle(b))).map((i) => itemCard(i)));
+  html += row('🔁 Watch again', movies.filter((m) => m.progress.watched).map((i) => itemCard(i, { noCycle: true })));
+  html += row('🍿 Everything', movies.slice().sort((a, b) => displayTitle(a).localeCompare(displayTitle(b))).map((i) => itemCard(i, { noCycle: true })));
   html += '<div id="kids-recs"></div></div>';
   view.innerHTML = html;
   startHeroCycle(pool, 'kids-hero', true);
@@ -604,11 +605,11 @@ const view = $('#view');
 function continueWatching(kidsOnly) {
   const out = [];
   const movies = LIB.items.filter((i) => i.kind !== 'episode' && i.progress.pos > 30 && !i.progress.watched && (!kidsOnly || i.kidsSafe));
-  for (const m of movies) out.push({ t: m.progress.updated, html: itemCard(m, { resume: true, play: true }) });
+  for (const m of movies) out.push({ t: m.progress.updated, html: itemCard(m, { resume: true, play: true, noCycle: true }) });
   for (const s of LIB.shows.values()) {
     if (!s.updated || (kidsOnly && !s.episodes.some((e) => e.kidsSafe))) continue;
     const e = nextUp(s);
-    if (e) out.push({ t: s.updated, html: itemCard(e, { resume: true, play: true }) });
+    if (e) out.push({ t: s.updated, html: itemCard(e, { resume: true, play: true, noCycle: true }) });
   }
   return out.sort((a, b) => b.t - a.t).map((x) => x.html);
 }
@@ -624,13 +625,13 @@ function renderHome() {
   html += '<div id="home-recs"></div>';
   // recently added: movies + shows as units
   const recent = [
-    ...movies.map((m) => ({ t: m.added, html: itemCard(m) })),
+    ...movies.map((m) => ({ t: m.added, html: itemCard(m, { noCycle: true }) })),
     ...[...LIB.shows.values()].map((s) => ({ t: s.added, html: showCard(s) })),
   ].sort((a, b) => b.t - a.t).slice(0, 24).map((x) => x.html);
   html += row('Recently Added', recent);
   html += row('TV Shows', [...LIB.shows.values()].sort((a, b) => a.name.localeCompare(b.name)).map(showCard), '#/shows');
   const colls = [...LIB.collections.entries()].filter(([, l]) => l.length >= 2).sort((a, b) => b[1].length - a[1].length);
-  for (const [name, list] of colls.slice(0, 4)) html += row(name, list.map((i) => itemCard(i)));
+  for (const [name, list] of colls.slice(0, 4)) html += row(name, list.map((i) => itemCard(i, { noCycle: true })));
   const decades = new Map();
   for (const m of movies) {
     const d = m.year ? `${Math.floor(m.year / 10) * 10}s` : 'Undated';
@@ -639,9 +640,9 @@ function renderHome() {
   }
   for (const d of [...decades.keys()].sort().reverse()) {
     const list = decades.get(d).sort((a, b) => (b.year || 0) - (a.year || 0));
-    html += row(d === 'Undated' ? 'More Movies' : `From the ${d}`, list.map((i) => itemCard(i)));
+    html += row(d === 'Undated' ? 'More Movies' : `From the ${d}`, list.map((i) => itemCard(i, { noCycle: true })));
   }
-  html += row('Extras & Other', LIB.items.filter((i) => i.kind === 'extra' || i.kind === 'other').map((i) => itemCard(i)));
+  html += row('Extras & Other', LIB.items.filter((i) => i.kind === 'extra' || i.kind === 'other').map((i) => itemCard(i, { noCycle: true })));
   html += row('Collections', colls.map(([n, l]) => collectionCard(n, l)), '#/collections');
   html += '</div>';
   view.innerHTML = html;
@@ -914,7 +915,7 @@ function moreLike(meta, opts = {}) {
     if (x.id === opts.excludeId) return;
     if (opts.excludeColl && x.collection === opts.excludeColl) return;
     const sd = score(x.meta || {});
-    if (sd) out.push({ sd, html: itemCard(x) });
+    if (sd) out.push({ sd, html: itemCard(x, { noCycle: true }) });
   };
   const addShow = (s) => {
     if (s.key === opts.excludeKey) return;
@@ -974,7 +975,7 @@ function openItem(id) {
       ${shareRow('item', it.id)}
       ${KIDS.on ? '' : `<div><button class="btn btn-ghost btn-sm" data-act="edit" data-id="${it.id}" style="margin-top:8px">${ICON.edit} Edit info</button></div>`}
     </div></div>
-    ${coll && coll.length > 1 ? `<div class="m-section"><h3>${esc(it.collection)}</h3><div class="minigrid">${coll.filter((x) => x.id !== it.id && (!KIDS.on || x.kidsSafe)).map((x) => itemCard(x)).join('')}</div></div>` : ''}
+    ${coll && coll.length > 1 ? `<div class="m-section"><h3>${esc(it.collection)}</h3><div class="minigrid">${coll.filter((x) => x.id !== it.id && (!KIDS.on || x.kidsSafe)).map((x) => itemCard(x, { noCycle: true })).join('')}</div></div>` : ''}
     ${moreLike(it.meta, { excludeId: it.id, excludeColl: it.collection })}
     ${KIDS.on || !(it.meta && it.meta.imdbId) ? '' : '<div class="m-section" id="mltd"><h3 class="kv">Loading more to download…</h3></div>'}
     ${KIDS.on ? '' : techTable(it)}</div>`, { type: 'item', id });
@@ -1027,7 +1028,7 @@ function openCollection(name) {
   const bg = list.map(img).find(Boolean) || '';
   openModal(`<div class="m-hero" style="${bg ? `background-image:url('${esc(bg)}')` : ''}"><div class="m-hero-body"><div class="kicker">Collection</div><h1>${esc(name)}</h1>
     <div class="metaline"><span>${list.length} titles</span>${list[0] && list[0].year ? `<span>${list[0].year}–${list[list.length - 1].year || ''}</span>` : ''}</div></div></div>
-    <div class="m-body"><div class="minigrid">${list.map((i) => itemCard(i)).join('')}</div></div>`, { type: 'coll', name });
+    <div class="m-body"><div class="minigrid">${list.map((i) => itemCard(i, { noCycle: true })).join('')}</div></div>`, { type: 'coll', name });
 }
 
 function openEdit(id) {
