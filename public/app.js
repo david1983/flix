@@ -68,7 +68,9 @@ function displayTitle(it) {
   if (it.kind === 'movie' && it.meta && it.meta.name) return it.meta.name + (it.part ? ` (Part ${it.part})` : '');
   return it.title;
 }
-function img(it) { return it.thumb ? `/api/thumb/${it.id}.jpg` : ''; }
+function img(it, n) { return it.thumb ? `/api/thumb/${it.id}${n > 1 ? '.' + n : ''}.jpg` : ''; }
+const randShot = (it) => 1 + Math.floor(Math.random() * (it.shots || 1));
+const imgRand = (it) => img(it, it.thumb ? randShot(it) : undefined);
 function fmtVotes(n) { return !n ? '' : n >= 1e6 ? (n / 1e6).toFixed(1) + 'M' : n >= 1e3 ? Math.round(n / 1e3) + 'K' : String(n); }
 function imdbScore(m, votes) {
   if (!m || !m.rating) return '';
@@ -106,13 +108,16 @@ async function loadLibrary() {
   LIB = { items, byId, shows, collections, scanning: data.scanning, imdb: data.imdb };
   SETTINGS = data.settings || SETTINGS;
   applyBranding();
-  $('#rescan').classList.toggle('spin', !!data.scanning);
+  $('#rescan').classList.toggle('busy', !!data.scanning);
+  if (data.scanning && !pollingScan) pollScan();
   return LIB;
 }
 
 function showImg(s) {
-  const e = s.episodes.find((e) => e.thumb);
-  return e ? `/api/thumb/${e.id}.jpg` : '';
+  const thumbs = s.episodes.filter((e) => e.thumb);
+  if (!thumbs.length) return '';
+  const e = thumbs[Math.floor(Math.random() * thumbs.length)];
+  return img(e, randShot(e));
 }
 function nextUp(show) {
   // the episode after the most recently watched one, or the in-progress one
@@ -132,10 +137,11 @@ function nextEpisode(it) {
 
 // ---------- cards & rows ----------
 function card(o) {
-  // o: { title, sub, img, pct, watched, count, onclick-data }
+  // o: { title, sub, img, cyc: {id, shots, backN}, pct, watched, count, onclick-data }
   const pct = o.pct ? Math.min(100, Math.max(2, o.pct * 100)) : 0;
+  const cyc = o.cyc ? `<img class="cyc" data-n="${o.cyc.backN}" style="opacity:0" src="/api/thumb/${o.cyc.id}${o.cyc.backN > 1 ? '.' + o.cyc.backN : ''}.jpg" loading="lazy" alt="" onerror="this.classList.add('off')">` : '';
   return `<div class="card ${pct ? 'has-bar' : ''}" tabindex="0" data-open="${esc(o.open)}" title="${esc(o.title)}">
-    <div class="img">${o.img ? `<img loading="lazy" src="${esc(o.img)}" alt="" onerror="this.remove()">` : ''}<div class="ph" ${o.img ? 'style="z-index:-1"' : ''}>${esc(o.title)}</div></div>
+    <div class="img" ${o.cyc ? `cyc data-cyc="${o.cyc.id}" data-shots="${o.cyc.shots}"` : ''}>${o.img ? `<img data-n="${o.cyc ? o.cyc.n : 1}" loading="lazy" src="${esc(o.img)}" alt="" onerror="this.remove()">` : ''}${cyc}<div class="ph" ${o.img ? 'style="z-index:-1"' : ''}>${esc(o.title)}</div></div>
     <div class="shade"></div>
     ${o.count ? `<span class="count">${esc(o.count)}</span>` : ''}
     ${o.watched ? `<span class="tick" title="Watched">${ICON.check}</span>` : ''}
@@ -149,7 +155,14 @@ function itemCard(it, opts = {}) {
   let title = displayTitle(it), sub = [it.year, fmtDur(it.duration), it.meta && it.meta.rating ? `★ ${it.meta.rating.toFixed(1)}` : ''].filter(Boolean).join(' · ');
   if (it.kind === 'episode') { title = it.show; sub = `S${it.season} E${it.episode}` + (it.ep && it.ep.title ? ` · ${epName(it)}` : '') + (opts.resume && pct ? ` · ${fmtTime(it.duration - it.progress.pos)} left` : ''); }
   else if (opts.resume && pct) sub = `${fmtTime(it.duration - it.progress.pos)} left`;
-  return card({ title, sub, img: img(it), pct, watched: it.progress.watched, open: (opts.play ? 'play:' : 'item:') + it.id, playable: opts.play });
+  const shots = it.shots || 1;
+  const n = it.thumb ? 1 + Math.floor(Math.random() * shots) : 0; // random start frame every render
+  return card({
+    title, sub,
+    img: it.thumb ? `/api/thumb/${it.id}${n > 1 ? '.' + n : ''}.jpg` : '',
+    cyc: it.thumb && shots > 1 ? { id: it.id, n, shots, backN: (n % shots) + 1 } : null,
+    pct, watched: it.progress.watched, open: (opts.play ? 'play:' : 'item:') + it.id, playable: opts.play,
+  });
 }
 function showCard(s) {
   const seasons = s.seasons.length;
@@ -158,7 +171,7 @@ function showCard(s) {
 }
 function collectionCard(name, list) {
   const first = list.find((i) => img(i)) || list[0];
-  return card({ title: name, sub: `${list.length} titles`, img: first ? img(first) : '', open: 'coll:' + name, count: list.length });
+  return card({ title: name, sub: `${list.length} titles`, img: first ? imgRand(first) || '' : '', open: 'coll:' + name, count: list.length });
 }
 function row(title, cardsHtml, link) {
   if (!cardsHtml.length) return '';
@@ -412,21 +425,90 @@ function applyBranding() {
 }
 const hasGenre = (it, g) => it.meta && (it.meta.genres || []).includes(g);
 
+// ---------- hero carousel (home + kids) — cycles movies + their screenshots ----------
+const HERO_SLOTS = 8, HERO_MS = 9000;
+let heroTimer = null, heroSpin = 0;
+function heroShell(cls) {
+  return `<section class="hero ${cls}" id="hero">
+    <div class="hero-img" id="hero-a"></div><div class="hero-img" id="hero-b" style="opacity:0"></div>
+    <div class="hero-body" id="hero-body"></div><div class="hero-dots" id="hero-dots"></div></section>`;
+}
+function heroBodyHtml(m, kids) {
+  if (kids) return `<div class="kicker">Let's watch!</div><h1>${esc(displayTitle(m))}</h1>
+      ${m.meta && m.meta.overview ? `<p>${esc(m.meta.overview)}</p>` : ''}
+      <div class="btns"><button class="btn btn-play" data-open="play:${m.id}">${ICON.play} ${m.progress.pos > 30 && !m.progress.watched ? 'Keep watching' : 'Play'}</button>
+      <button class="btn btn-ghost" data-open="item:${m.id}">${ICON.info} What's it about?</button></div>`;
+  const resume = m.progress.pos > 30 && !m.progress.watched;
+  return `<div class="kicker">${m.collection ? esc(m.collection) : 'Featured'}</div><h1>${esc(displayTitle(m))}</h1>
+      <div class="metaline">${imdbScore(m.meta)}${m.year ? `<span>${m.year}</span>` : ''}<span>${fmtDur(m.duration)}</span>${resBadge(m.video)}${m.meta && m.meta.genres.length ? `<span>${esc(m.meta.genres.slice(0, 3).join(' · '))}</span>` : ''}</div>
+      <p>${m.meta && m.meta.overview ? esc(m.meta.overview) : ''}</p>
+      <div class="btns"><button class="btn btn-play" data-open="play:${m.id}">${ICON.play} ${resume ? 'Resume' : 'Play'}</button>
+      <button class="btn btn-ghost" data-open="item:${m.id}">${ICON.info} More Info</button></div>`;
+}
+function stopHero() { if (heroTimer) { clearInterval(heroTimer); heroTimer = null; } }
+function startHeroCycle(pool, cls, kids) {
+  stopHero();
+  heroSpin = 0;
+  const el = $('#hero');
+  if (!el || !pool.length) return;
+  // spread picks out of the pool, rotating hourly so each visit starts elsewhere
+  const seed = Math.floor(Date.now() / 36e5) * 3;
+  const heroes = [];
+  const step = Math.max(1, Math.floor(pool.length / (HERO_SLOTS + 2)));
+  for (let i = 0; heroes.length < Math.min(HERO_SLOTS, pool.length); i++) {
+    const m = pool[(seed + i * step) % pool.length];
+    if (m && !heroes.includes(m)) heroes.push(m);
+    if (i > pool.length * 2) break; // safety
+  }
+  let idx = 0, paused = false, front = 'a';
+  const body = $('#hero-body'), dots = $('#hero-dots');
+  $('#hero-a').style.backgroundImage = `url('${esc(img(heroes[0], 1))}')`;
+  body.innerHTML = heroBodyHtml(heroes[0], kids);
+  dots.innerHTML = heroes.map((_, i) => `<button class="hero-dot${i ? '' : ' on'}" data-i="${i}" aria-label="Show title ${i + 1}"></button>`).join('');
+  el.onmouseover = () => { paused = true; };
+  el.onmouseout = () => { paused = false; };
+  el.addEventListener('click', (e) => {
+    const d = e.target.closest('.hero-dot');
+    if (d) show(Number(d.dataset.i));
+  });
+  function show(i) {
+    idx = (i + heroes.length) % heroes.length;
+    const m = heroes[idx];
+    heroSpin++;
+    const n = 1 + (heroSpin % (m.shots || 1)); // each appearance gets a fresh screenshot
+    const back = front === 'a' ? 'b' : 'a';
+    const swapText = () => {
+      if (!document.getElementById('hero-body')) return;
+      body.innerHTML = heroBodyHtml(m, kids);
+      body.style.opacity = 1;
+    };
+    const url = img(m, m.shots > 1 ? n : 1);
+    const pre = new Image();
+    pre.onload = () => {
+      if (!document.getElementById('hero-a')) return;
+      $('#hero-' + back).style.backgroundImage = `url('${esc(url)}')`;
+      $('#hero-' + back).style.opacity = 1;
+      $('#hero-' + front).style.opacity = 0;
+      front = back;
+      swapText();
+    };
+    pre.onerror = swapText;
+    body.style.opacity = 0;
+    setTimeout(swapText, 900); // fallback if image stalls
+    pre.src = url;
+    [ ...dots.children ].forEach((d, j) => d.classList.toggle('on', j === idx));
+  }
+  const tick = () => { if (!document.getElementById('hero')) return stopHero(); if (!paused) show(idx + 1); };
+  heroTimer = setInterval(tick, HERO_MS);
+}
+
 function renderKids() {
   const movies = kidItems().filter((i) => i.kind === 'movie');
   const shows = kidShows();
   const pool = movies.filter((m) => img(m) && m.meta && m.meta.overview);
-  const hero = pool.length ? pool[Math.floor(Date.now() / 36e5) % pool.length] : null;
   let html = '';
-  if (hero) {
-    const resume = hero.progress.pos > 30 && !hero.progress.watched;
-    html += `<section class="hero kids-hero"><div class="hero-img" style="background-image:url('${esc(img(hero))}')"></div>
-      <div class="hero-body"><div class="kicker">Let's watch!</div><h1>${esc(displayTitle(hero))}</h1>
-      ${hero.meta.overview ? `<p>${esc(hero.meta.overview)}</p>` : ''}
-      <div class="btns"><button class="btn btn-play" data-open="play:${hero.id}">${ICON.play} ${resume ? 'Keep watching' : 'Play'}</button>
-      <button class="btn btn-ghost" data-open="item:${hero.id}">${ICON.info} What's it about?</button></div></div></section>`;
-  }
-  html += `<div class="rows" ${hero ? '' : 'style="margin-top:0;padding-top:90px"'}>`;
+  if (pool.length) html += heroShell('kids-hero');
+  html += `<div class="rows" ${pool.length ? '' : 'style="margin-top:0;padding-top:90px"'}>`;
   const cw = continueWatching(true);
   html += row('▶️ Keep watching', cw);
   if (shows.length) html += row('📺 Shows', shows.map(showCard));
@@ -440,6 +522,7 @@ function renderKids() {
   html += row('🍿 Everything', movies.slice().sort((a, b) => displayTitle(a).localeCompare(displayTitle(b))).map((i) => itemCard(i)));
   html += '<div id="kids-recs"></div></div>';
   view.innerHTML = html;
+  startHeroCycle(pool, 'kids-hero', true);
   if (LIB.imdb) api('/api/discover?kids=1').then((d) => {
     const el = $('#kids-recs');
     if (!el || !d.kids) return;
@@ -499,6 +582,23 @@ function renderSettings() {
   };
 }
 
+// ---------- card screenshot cycling (two-layer crossfade) ----------
+const CYC_MS = 3600;
+setInterval(() => {
+  $$('.card .img[cyc]').forEach((box) => {
+    const imgs = [...box.querySelectorAll('img')].filter((i) => !i.classList.contains('off'));
+    if (imgs.length !== 2 || !(Number(box.dataset.shots) > 1)) return;
+    const front = imgs[0].style.opacity === '0' ? imgs[1] : imgs[0];
+    const back = front === imgs[0] ? imgs[1] : imgs[0];
+    const shots = Number(box.dataset.shots);
+    const next = (Number(back.dataset.n || 1) % shots) + 1;
+    back.dataset.n = next;
+    back.src = `/api/thumb/${box.dataset.cyc}${next > 1 ? '.' + next : ''}.jpg`;
+    const flip = () => { back.style.opacity = 1; front.style.opacity = 0; };
+    if (back.complete) flip(); else back.onload = flip;
+  });
+}, CYC_MS);
+
 // ---------- views ----------
 const view = $('#view');
 function continueWatching(kidsOnly) {
@@ -517,22 +617,9 @@ function renderHome() {
   const movies = LIB.items.filter((i) => i.kind === 'movie');
   let withImg = movies.filter((m) => img(m) && m.duration > 1800);
   if (withImg.some((m) => m.meta && m.meta.overview)) withImg = withImg.filter((m) => m.meta && m.meta.overview);
-  const daySeed = Math.floor(Date.now() / 36e5); // rotate hourly
-  const hero = withImg.length ? withImg[(daySeed * 7919) % withImg.length] : null;
   let html = '';
-  if (hero) {
-    const resume = hero.progress.pos > 30 && !hero.progress.watched;
-    html += `<section class="hero"><div class="hero-img" style="background-image:url('${esc(img(hero))}')"></div>
-      <div class="hero-body">
-        ${hero.collection ? `<div class="kicker">${esc(hero.collection)}</div>` : '<div class="kicker">Featured</div>'}
-        <h1>${esc(displayTitle(hero))}</h1>
-        <div class="metaline">${imdbScore(hero.meta)}${hero.year ? `<span>${hero.year}</span>` : ''}<span>${fmtDur(hero.duration)}</span>${resBadge(hero.video)}${hero.meta && hero.meta.genres.length ? `<span>${esc(hero.meta.genres.slice(0, 3).join(' · '))}</span>` : ''}</div>
-        ${hero.meta && hero.meta.overview ? `<p>${esc(hero.meta.overview)}</p>` : '<p></p>'}
-        <div class="btns"><button class="btn btn-play" data-open="play:${hero.id}">${ICON.play} ${resume ? 'Resume' : 'Play'}</button>
-        <button class="btn btn-ghost" data-open="item:${hero.id}">${ICON.info} More Info</button></div>
-      </div></section>`;
-  }
-  html += `<div class="rows" ${hero ? '' : 'style="margin-top:0;padding-top:90px"'}>`;
+  if (withImg.length) html += heroShell('');
+  html += `<div class="rows" ${withImg.length ? '' : 'style="margin-top:0;padding-top:90px"'}>`;
   html += row('Continue Watching', continueWatching());
   html += '<div id="home-recs"></div>';
   // recently added: movies + shows as units
@@ -558,6 +645,7 @@ function renderHome() {
   html += row('Collections', colls.map(([n, l]) => collectionCard(n, l)), '#/collections');
   html += '</div>';
   view.innerHTML = html;
+  startHeroCycle(withImg, '', false);
   if (LIB.imdb) loadDiscover().then((d) => {
     const el = $('#home-recs');
     if (!el || !d.movies) return;
@@ -863,7 +951,7 @@ function openItem(id) {
   const pct = resume ? it.progress.pos / it.duration : 0;
   const coll = it.collection && LIB.collections.get(it.collection);
   const langs = [...new Set(it.audio.map((a) => langName(a.lang)).filter(Boolean))];
-  const bg = img(it);
+  const bg = imgRand(it);
   openModal(`<div class="m-hero" style="${bg ? `background-image:url('${esc(bg)}')` : ''}"><div class="m-hero-body">
       <h1>${esc(displayTitle(it))}</h1>
       <div class="btns"><button class="btn btn-play" data-open="play:${it.id}">${ICON.play} ${resume ? 'Resume' : 'Play'}</button>
@@ -1100,12 +1188,18 @@ addEventListener('scroll', () => $('#nav').classList.toggle('solid', scrollY > 4
 addEventListener('hashchange', () => { NAV_CLOSE = true; closeModal(); route(); scrollTo(0, 0); });
 $('#rescan').onclick = async () => {
   await api('/api/rescan', {});
-  $('#rescan').classList.add('spin');
+  $('#rescan').classList.add('busy');
   toast('Rescanning library…');
   pollScan();
 };
+let pollingScan = false;
 function pollScan() {
-  setTimeout(async () => { await reload(); if (LIB.scanning) pollScan(); }, 4000);
+  if (pollingScan) return;
+  pollingScan = true;
+  const iv = setInterval(async () => {
+    try { await reload(); } catch {}
+    if (!LIB.scanning) { clearInterval(iv); pollingScan = false; }
+  }, 4000);
 }
 
 function toast(msg) {

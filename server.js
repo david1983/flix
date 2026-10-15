@@ -144,6 +144,7 @@ function buildItem(rel, st, info) {
   it.poster = fs.existsSync(path.join(THUMB_DIR, it.id + '.poster.jpg'));
   const extSubs = findSidecarSubs(rel);
   if (extSubs.length) it.subs = (it.subs || []).concat(extSubs);
+  it.shots = [1, 2, 3, 4].filter((n) => fs.existsSync(path.join(THUMB_DIR, it.id + (n > 1 ? '.' + n : '') + '.jpg'))).length;
   return it;
 }
 
@@ -205,23 +206,40 @@ function rebuildItem(it) {
 }
 
 // ---------- thumbnails ----------
+// Each title gets SHOT_COUNT screenshots: base `id.jpg` (also used as og/poster fallback)
+// plus `id.N.jpg` stills at spread seek points. Cards + hero cycle through them so the
+// same artwork doesn't repeat.
 const TONEMAP = 'zscale=t=linear:npl=100,format=gbrpf32le,zscale=p=bt709,tonemap=hable:desat=0,zscale=t=bt709:m=bt709:r=tv,format=yuv420p';
+const SHOT_COUNT = 4;
+const SHOT_FRAC = { 1: { ep: 0.3, m: 0.2 }, 2: 0.5, 3: 0.7, 4: 0.88 };
+
+async function grabFrame(full, at, mapIndex, vf, out) {
+  // Damaged files can make ffmpeg exit 0 without writing a frame, so fall back to earlier seek points.
+  for (const t of [at, at / 3, 60, 30, 1].map((t) => Math.max(1, Math.round(t)))) {
+    await run('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-nostdin', '-ss', String(t), '-i', full,
+      '-map', `0:${mapIndex}`, '-frames:v', '1', '-vf', vf, '-q:v', '4', '-y', out], { timeout: 120000 }).catch(() => {});
+    if (fs.existsSync(out)) return true;
+  }
+  return false;
+}
 
 async function makeThumbs() {
-  const todo = library.items.filter((i) => !i.thumb && i.video);
+  const todo = library.items.filter((i) => i.video && (i.thumb || (i.shots || 0) < SHOT_COUNT) && (i.shots || 0) < SHOT_COUNT);
   await pool(todo, 2, async (it) => {
     const full = path.join(MEDIA_DIR, it.file);
-    const out = path.join(THUMB_DIR, it.id + '.jpg');
-    const at = Math.max(1, Math.min(it.duration * (it.kind === 'episode' ? 0.3 : 0.2), it.duration - 1 || 1));
+    const dur = it.duration || 0;
     let vf = 'scale=1280:-2';
     if (it.video.hdr) vf = 'scale=1280:-2,' + TONEMAP;
-    // Damaged files can make ffmpeg exit 0 without writing a frame, so check the output and fall back to earlier seek points.
-    for (const t of [at, at / 4, 30, 1]) {
-      await run('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-nostdin', '-ss', String(Math.min(t, at)), '-i', full, '-map', `0:${it.video.index}`,
-        '-frames:v', '1', '-vf', vf, '-q:v', '4', '-y', out], { timeout: 120000 }).catch(() => {});
-      if (fs.existsSync(out)) break;
+    for (let n = 1; n <= SHOT_COUNT; n++) {
+      const out = path.join(THUMB_DIR, it.id + (n > 1 ? '.' + n : '') + '.jpg');
+      if (fs.existsSync(out)) continue;
+      const frac = typeof SHOT_FRAC[n] === 'number' ? SHOT_FRAC[n] : (it.kind === 'episode' ? SHOT_FRAC[1].ep : SHOT_FRAC[1].m);
+      const at = Math.max(1, Math.min(dur * frac, dur - 1 || 1));
+      const ok = await grabFrame(full, at, it.video.index, vf, out);
+      if (!ok && n === 1) throw new Error(`thumb failed: ${it.file}`);
+      if (!ok) console.warn(`shot ${it.id}.${n} failed: ${it.file}`);
     }
-    if (!fs.existsSync(out)) throw new Error(`thumb failed: ${it.file}`);
+    it.shots = SHOT_COUNT;
     it.thumb = true;
     if (it.posterStream != null) {
       await run('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-nostdin', '-i', full, '-map', `0:${it.posterStream}`, '-frames:v', '1',
@@ -613,8 +631,8 @@ route('POST', /^\/api\/dismiss$/, async (req, res) => {
 
 route('POST', /^\/api\/rescan$/, (req, res) => { scan(); send(res, 202, { ok: true }); });
 
-route('GET', /^\/api\/thumb\/([0-9a-f]{12})(\.poster)?\.jpg$/, (req, res, m) =>
-  serveFile(req, res, path.join(THUMB_DIR, m[1] + (m[2] || '') + '.jpg')));
+route('GET', /^\/api\/thumb\/([0-9a-f]{12})(?:\.([2-8]))?(\.poster)?\.jpg$/, (req, res, m) =>
+  serveFile(req, res, path.join(THUMB_DIR, m[1] + (m[2] ? '.' + m[2] : '') + (m[3] || '') + '.jpg')));
 
 route('GET', /^\/img\/([\w.-]+)$/, (req, res, m) => serveFile(req, res, path.join(IMG_DIR, m[1])));
 
