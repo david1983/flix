@@ -3,4 +3,4 @@ data/
 .env
 *.log
 .playwright-mcp/
-.DS_Store
+.DS_Store.pi/
