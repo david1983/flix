@@ -1,0 +1,53 @@
+services:
+  transmission:
+    image: lscr.io/linuxserver/transmission:latest
+    container_name: flix-transmission
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=Etc/UTC
+      # RPC open inside the compose network only; do NOT publish 9091 to the host.
+      - TRANSMISSION_RPC_ENABLED=true
+      - TRANSMISSION_RPC_AUTHENTICATION_REQUIRED=false
+      - TRANSMISSION_RPC_WHITELIST_ENABLED=false
+      - TRANSMISSION_RPC_BIND_ADDRESS=0.0.0.0
+      - TRANSMISSION_DOWNLOAD_DIR=/media
+      - TRANSMISSION_INCOMPLETE_DIR_ENABLED=false
+      - TRANSMISSION_PEER_PORT=51413
+      - TRANSMISSION_START_ADDED_TORRENTS=true
+    volumes:
+      - ${MEDIA_DIR:-/mnt/nfs/movies}:/media
+      - transmission-config:/config
+    ports:
+      - "51413:51413"
+      - "51413:51413/udp"
+    restart: unless-stopped
+
+  flix:
+    build: .
+    container_name: flix-app
+    depends_on:
+      - transmission
+    environment:
+      - PORT=8787
+      - HOST=0.0.0.0
+      - MEDIA_DIR=/media
+      - DATA_DIR=/data
+      - TRANSMISSION_RPC_URL=http://transmission:9091/transmission/rpc
+      # .env at the compose file directory feeds both of these (loader skips keys
+      # already present in the real environment, so these compose values win).
+      - TRANSMISSION_USER=${TRANSMISSION_USER:-transmission}
+      - TRANSMISSION_PASSWORD=${TRANSMISSION_PASSWORD:-}
+      # Subtitles (OpenSubtitles) — set these in .env if you want "Download subtitles":
+      - OS_API_KEY=${OS_API_KEY:-}
+      - OS_LOGIN=${OS_LOGIN:-}
+      - OS_PASSWORD=${OS_PASSWORD:-}
+    ports:
+      - "${PORT:-8787}:8787"
+    volumes:
+      - ${MEDIA_DIR:-/mnt/nfs/movies}:/media
+      - ${DATA_DIR:-./data}:/data
+    restart: unless-stopped
+
+volumes:
+  transmission-config:
