@@ -100,8 +100,6 @@ body.noscroll { overflow: hidden; }
 .card .ph { position: absolute; inset: 0; display: grid; place-items: center; padding: 12px; text-align: center; font-weight: 700; color: #bbb; }
 .card .shade { position: absolute; inset: 0; border-radius: var(--radius); background: linear-gradient(0deg, rgba(0,0,0,.88) 0%, rgba(0,0,0,.25) 45%, rgba(0,0,0,0) 65%); }
 /* screenshot cycler: stacked absolute layers, crossfaded by JS */
-.img[cyc] > img { position: absolute; inset: 0; }
-.card img.cyc { transition: opacity .8s ease; }
 .card img.cyc.off { display: none; }
 .card .label { position: absolute; left: 10px; right: 10px; bottom: 9px; }
 .card .t { font-weight: 700; font-size: 14px; line-height: 1.2; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; text-shadow: 0 1px 4px rgba(0,0,0,.8); }
@@ -135,6 +133,8 @@ select, .chk { background: var(--bg-3); border: 1px solid var(--line); color: va
 @keyframes pop { from { transform: translateY(16px) scale(.98); opacity: 0; } }
 .modal-close { position: absolute; top: 14px; right: 14px; z-index: 4; width: 36px; height: 36px; border-radius: 50%; border: 0; background: #181818; color: #fff; font-size: 16px; }
 .m-hero { position: relative; aspect-ratio: 16 / 8; background: #000 center/cover; }
+.cyc-hero { overflow: hidden; }
+.m-hero-bg { position: absolute; inset: 0; background: #000 center/cover; transition: opacity .7s ease; }
 .m-hero::after { content: ""; position: absolute; inset: 0; background: linear-gradient(0deg, var(--bg-2) 0%, rgba(20,20,24,0) 55%); }
 .m-hero-body { position: absolute; left: 40px; right: 40px; bottom: 26px; z-index: 1; }
 .m-hero h1 { margin: 0 0 14px; font-size: clamp(24px, 4vw, 44px); line-height: 1.05; text-shadow: 0 2px 12px rgba(0,0,0,.7); }

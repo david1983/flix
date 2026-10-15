@@ -157,7 +157,7 @@ function itemCard(it, opts = {}) {
   else if (opts.resume && pct) sub = `${fmtTime(it.duration - it.progress.pos)} left`;
   const shots = it.shots || 1;
   const n = it.thumb ? 1 + Math.floor(Math.random() * shots) : 0; // random start frame every render
-  const cycle = !opts.noCycle && it.thumb && shots > 1;
+  const cycle = false; // cycling only lives in the title modal backdrop
   return card({
     title, sub,
     img: it.thumb ? `/api/thumb/${it.id}${n > 1 ? '.' + n : ''}.jpg` : '',
@@ -583,22 +583,33 @@ function renderSettings() {
   };
 }
 
-// ---------- card screenshot cycling (two-layer crossfade) ----------
-const CYC_MS = 3600;
-setInterval(() => {
-  $$('.card .img[cyc]').forEach((box) => {
-    const imgs = [...box.querySelectorAll('img')].filter((i) => !i.classList.contains('off'));
-    if (imgs.length !== 2 || !(Number(box.dataset.shots) > 1)) return;
-    const front = imgs[0].style.opacity === '0' ? imgs[1] : imgs[0];
-    const back = front === imgs[0] ? imgs[1] : imgs[0];
-    const shots = Number(box.dataset.shots);
-    const next = (Number(back.dataset.n || 1) % shots) + 1;
-    back.dataset.n = next;
-    back.src = `/api/thumb/${box.dataset.cyc}${next > 1 ? '.' + next : ''}.jpg`;
-    const flip = () => { back.style.opacity = 1; front.style.opacity = 0; };
-    if (back.complete) flip(); else back.onload = flip;
-  });
-}, CYC_MS);
+// ---------- title modal: cycle the backdrop through the title's screenshots ----------
+let mHeroTimer = null;
+function stopModalShots() { if (mHeroTimer) { clearInterval(mHeroTimer); mHeroTimer = null; } }
+function cycleModalShots(it) {
+  stopModalShots();
+  if (!it || !(it.shots > 1)) return;
+  let front = 'a', c = 0;
+  const tick = () => {
+    if (!document.getElementById('mhb-a')) return stopModalShots();
+    c++;
+    const n = (c % it.shots) + 1;
+    const b = front === 'a' ? 'b' : 'a';
+    const url = `/api/thumb/${it.id}${n > 1 ? '.' + n : ''}.jpg`;
+    const pre = new Image();
+    pre.onload = () => {
+      const a = document.getElementById('mhb-a');
+      if (!a) return stopModalShots();
+      $('#mhb-' + b).style.backgroundImage = `url('${esc(url)}')`;
+      $('#mhb-' + b).style.opacity = 1;
+      $('#mhb-' + front).style.opacity = 0;
+      front = b;
+    };
+    pre.onerror = () => {};
+    pre.src = url;
+  };
+  mHeroTimer = setInterval(tick, 5200);
+}
 
 // ---------- views ----------
 const view = $('#view');
@@ -851,7 +862,7 @@ function openModal(html, st) {
 let NAV_CLOSE = false; // set by the hashchange handler so back/forward doesn't rewrite history
 function closeModal() {
   const was = modalState && modalState.type;
-  modal.hidden = true; document.body.classList.remove('noscroll'); modalState = null; stopTorrentPoll();
+  modal.hidden = true; document.body.classList.remove('noscroll'); modalState = null; stopTorrentPoll(); stopModalShots();
   const nav = NAV_CLOSE; NAV_CLOSE = false;
   if (!nav && (was === 'item' || was === 'show')) {
     const target = hashForLast();
@@ -952,13 +963,12 @@ function openItem(id) {
   const pct = resume ? it.progress.pos / it.duration : 0;
   const coll = it.collection && LIB.collections.get(it.collection);
   const langs = [...new Set(it.audio.map((a) => langName(a.lang)).filter(Boolean))];
-  const bg = imgRand(it);
-  openModal(`<div class="m-hero" style="${bg ? `background-image:url('${esc(bg)}')` : ''}"><div class="m-hero-body">
+  openModal(`<div class="m-hero cyc-hero"><div class="m-hero-bg" id="mhb-a" style="${it.thumb ? `background-image:url('${esc(img(it, 1))}')` : ''}"></div><div class="m-hero-bg" id="mhb-b" style="opacity:0"></div><div class="m-hero-body">
       <h1>${esc(displayTitle(it))}</h1>
       <div class="btns"><button class="btn btn-play" data-open="play:${it.id}">${ICON.play} ${resume ? 'Resume' : 'Play'}</button>
       ${resume ? `<button class="btn btn-ghost" data-act="restart" data-id="${it.id}">${ICON.restart} From start</button>` : ''}
       <button class="btn btn-ghost" data-act="watched" data-id="${it.id}" data-v="${it.progress.watched ? 0 : 1}">${it.progress.watched ? ICON.check + ' Watched' : ICON.plus + ' Mark watched'}</button></div>
-    </div></div>
+    </div></div></div>
     <div class="m-body"><div class="m-cols"><div>
       <div class="metaline">${imdbScore(it.meta, true)}${it.year ? `<span>${it.year}</span>` : ''}${it.meta && it.meta.certificate ? `<span class="badge">${esc(it.meta.certificate)}</span>` : ''}<span>${fmtDur(it.duration)}</span>${resBadge(it.video)}</div>
       ${resume ? `<p class="kv"><span class="pbar"><i style="width:${pct * 100}%"></i></span> &nbsp;${fmtTime(it.duration - it.progress.pos)} remaining</p>` : ''}
@@ -979,6 +989,7 @@ function openItem(id) {
     ${moreLike(it.meta, { excludeId: it.id, excludeColl: it.collection })}
     ${KIDS.on || !(it.meta && it.meta.imdbId) ? '' : '<div class="m-section" id="mltd"><h3 class="kv">Loading more to download…</h3></div>'}
     ${KIDS.on ? '' : techTable(it)}</div>`, { type: 'item', id });
+  cycleModalShots(it);
   if (!KIDS.on) setUrl('item/' + it.id);
   if (!KIDS.on && it.meta && it.meta.imdbId) loadMltd(it.meta.imdbId);
 }
