@@ -15,12 +15,16 @@ Netflix-style shelves, TV seasons, kid mode, torrent grab, subtitles. One Node f
 |---|---|
 | ![Home](docs/screenshots/home.png) | ![Movies](docs/screenshots/movies.png) |
 | ![TV Shows](docs/screenshots/shows.png) | ![Title details](docs/screenshots/item.png) |
+| ![Collections](docs/screenshots/collections.png) | ![Discover](docs/screenshots/discover.png) |
 | ![Settings](docs/screenshots/settings.png) | ![Kids mode](docs/screenshots/kids.png) |
 
 ## Features
 
 - **Library** — scans `MEDIA_DIR` recursively with ffprobe; movies, series (`SxxExx` filenames),
   collections, extras and "other" files are auto-detected
+- **Collections** — franchises, studios and directors are grouped automatically (James Bond, Star Wars,
+  Marvel, Batman, The Matrix, Pixar, Disney Classics, Christopher Nolan, …); rules live in
+  `lib/parse.js`, and any title can be moved to another collection via "Edit info"
 - **Home** — rotating hero, Continue Watching, Recently Added, per-genre / per-decade shelves,
   IMDb-powered "More like this" recommendations
 - **Discover** — watchlist, popular/top charts and recommendations for titles *not* in your library;
