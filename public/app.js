@@ -69,7 +69,14 @@ function displayTitle(it) {
   return it.title;
 }
 function img(it, n) { return it.thumb ? `/api/thumb/${it.id}${n > 1 ? '.' + n : ''}.jpg` : ''; }
-const randShot = (it) => 1 + Math.floor(Math.random() * (it.shots || 1));
+// random frame picked once per title per session, so re-renders (reload/scan polling) don't flip card images
+const SHOT_PICK = new Map();
+const randShot = (it) => {
+  const shots = it.shots || 1;
+  let n = SHOT_PICK.get(it.id);
+  if (!n || n > shots) { n = 1 + Math.floor(Math.random() * shots); SHOT_PICK.set(it.id, n); }
+  return n;
+};
 const imgRand = (it) => img(it, it.thumb ? randShot(it) : undefined);
 function fmtVotes(n) { return !n ? '' : n >= 1e6 ? (n / 1e6).toFixed(1) + 'M' : n >= 1e3 ? Math.round(n / 1e3) + 'K' : String(n); }
 function imdbScore(m, votes) {
@@ -156,7 +163,7 @@ function itemCard(it, opts = {}) {
   if (it.kind === 'episode') { title = it.show; sub = `S${it.season} E${it.episode}` + (it.ep && it.ep.title ? ` · ${epName(it)}` : '') + (opts.resume && pct ? ` · ${fmtTime(it.duration - it.progress.pos)} left` : ''); }
   else if (opts.resume && pct) sub = `${fmtTime(it.duration - it.progress.pos)} left`;
   const shots = it.shots || 1;
-  const n = it.thumb ? 1 + Math.floor(Math.random() * shots) : 0; // random start frame every render
+  const n = it.thumb ? randShot(it) : 0; // stable random frame per title
   const cycle = false; // cycling only lives in the title modal backdrop
   return card({
     title, sub,
